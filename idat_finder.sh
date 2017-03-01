@@ -3,8 +3,8 @@
 function usage() { 
 	cat <<EOF
 Help: 		This script locates the .idat files as supplied by the 
-		phenodata file containing the Sentrix ID and positions. 
-		The general filename of an .idat file is:
+		phenodata file containing the Sentrix ID (barcode) and 
+		positions. The general filename of an .idat file is:
 
 		[Sentrix_ID]_[Sentrix_Position]_[Grn/Red].idat 
 
@@ -13,6 +13,8 @@ Help: 		This script locates the .idat files as supplied by the
 		separate subdirectory.
 
 Usage: 		$0 [-s] phenodata [-f] path/to/idats_folder/ [-o] path/to/output_folder [-v] [-d] [-h]
+
+		Mandatory:
 	-s 	Phenodata containing the Sentrix ID and positions of 
 		the arrays.
 		
@@ -25,8 +27,13 @@ Usage: 		$0 [-s] phenodata [-f] path/to/idats_folder/ [-o] path/to/output_folder
 
 	-f 	Source folder that contains the subfolders 
 		containing the .idat files.
+
+		Optional:
 	-o 	Output folder that will contain the subdirectories, 
 		which in turn contain the .idat files.
+	-d	Per default this script will generate subdirectories
+		for each chip. Calling this flag will copy all the 
+		.idat files into the output directory.
 	-v	Executes and prints verbose messages.
 	-h	Basic help function (the current screen).
 
@@ -34,27 +41,32 @@ EOF
 }
 
 verbose=0
+subdirs=1
 
-while getopts "s:f:o:vh" opt; do
+while getopts "s:f:o:dvh" opt; do
 	case "$opt" in
 		s) 
 			phenodata=${OPTARG}
-			if [ ! -e $phenodata ]; then
+			if [ ! -e "$phenodata" ]; then
 				echo "Phenodata was not found"
 				exit 1
 			fi
 			;;
 		f) 
 			source_dir=${OPTARG}
-			if [ ! -d $source_dir ]; then
+			if [ ! -d "$source_dir" ]; then
 				echo "Source folder was not found"
 				exit 1
 			fi
 			;;
 		o) 
-			output_dir=${OPTARG}
+			output_dir="${OPTARG}"
 			;;
-		v) 	verbose=$((verbose+1))
+		d)	
+			subdirs=$((subdirs-1))
+			;;
+		v) 	
+			verbose=$((verbose+1))
 			;;
 		h)	
 			usage
@@ -70,7 +82,7 @@ done
 
 # Check if phenodata and source folder are provided and check the entire filepath is provided, else prepend that to them
 
-if [ -z $phenodata ]; then
+if [ -z "$phenodata" ]; then
 	echo "Phenodata was not provided"
 	usage
 	exit 1
@@ -79,7 +91,7 @@ else
 		phenodata=`pwd`/$phenodata
 	fi
 fi
-if [ -z $source_dir ]; then
+if [ -z "$source_dir" ]; then
 	echo "Source folder was not provided"
 	usage
 	exit 1
@@ -108,8 +120,9 @@ else
 	cd output
 fi
 
-sentrix_id=($(awk 'BEGIN{FS=","}{for(i=1;i<=NF;++i)if($i~/^[0-9]{12}$/)print $i}' $phenodata))
-sentrix_pos=($(awk 'BEGIN{FS=","}{for(i=1;i<=NF;++i)if($i~/^R[0-9]{2}C[0-9]{2}$/)print $i}' $phenodata))
+# NOTE: If the script does not return any Sentrix ID, it could be due to the length of the ID. The length is set to 10 and 12, which are the ID lengths I have seen so far. It would have been possible to use the ^[0-9]+$ regex, but then you have to make sure that the phenodata does not contain any other columns that contain only numerical values.
+sentrix_id=($(awk 'BEGIN{FS=","}{for(i=1;i<=NF;++i)if($i~/^[0-9]{12}$|^[0-9]{10}|{12}$/)print $i}' "$phenodata"))
+sentrix_pos=($(awk 'BEGIN{FS=","}{for(i=1;i<=NF;++i)if($i~/^R[0-9]{2}C[0-9]{2}$/)print $i}' "$phenodata"))
 
 #If verbose, print out the Sentrix IDs and the Sentrix positions
 if [ $verbose -eq 1 ]; then
@@ -134,16 +147,16 @@ for ((i=0;i<${#sentrix_id[@]};++i)); do
 	#Store the concatenated name into GRN and RED
 	sentrix_id_pos=${sentrix_id[i]}_${sentrix_pos[i]}
 	
-#	echo $sentrix_id_pos
-
 	GRN=$sentrix_id_pos"_Grn.idat"
 	RED=$sentrix_id_pos"_Red.idat"
 
- 	#Make several subdirectories containing the Sentrix IDs if subdirectories are wanted
- 	if [ ! -d "${sentrix_id[i]}" ]; then
- 		mkdir ${sentrix_id[i]}  		
- 	fi
- 	cd ${sentrix_id[i]}
+ 	#Make several subdirectories containing the Sentrix IDs if the -d is off (useful for minfi)
+	if [ $subdirs -eq 1 ]; then
+	 	if [ ! -d "${sentrix_id[i]}" ]; then
+	 		mkdir ${sentrix_id[i]}  		
+	 	fi
+	 	cd ${sentrix_id[i]}
+	fi
  
 	#Find the files and copy them to the data directory	
   	if [[ ! -z `find "$source_dir" -type f -name $GRN` ]]; then
@@ -170,7 +183,9 @@ for ((i=0;i<${#sentrix_id[@]};++i)); do
 		unknown_entries+=$RED
 	fi
  
- 	cd ..
+	if [ $subdirs -eq 1 ]; then
+ 		cd ..
+	fi
 done
 
 if [ ${#unknown_entries[@]} -ne 0 ]; then
